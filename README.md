@@ -52,7 +52,7 @@ graph TD
     subgraph Phase 1: Hierarchical Teaching
     B --> C[Explainer Agent: Writes Lesson]
     B --> D[Quiz Master Agent: Creates MCQs]
-    C -.Context passed to.-> D
+    C -->|Context passed to | D
     end
     
     C --> E((Human-in-the-Loop))
