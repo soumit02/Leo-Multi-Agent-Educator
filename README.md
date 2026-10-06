@@ -103,8 +103,8 @@ graph TD
 
 **1. Clone the repository:**
 ```bash
-git clone https://github.com/your-username/leo-ai-tutor.git
-cd leo-ai-tutor
+git clone https://github.com/soumit02/Leo-Multi-Agent-Educator.git
+cd Leo-Multi-Agent-Educator
 ```
 
 **2. Create a Virtual Environment and Install Dependencies:**
