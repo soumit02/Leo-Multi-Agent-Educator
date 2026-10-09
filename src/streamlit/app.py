@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 from dotenv import load_dotenv
+import litellm  # Added for testing the API connection
 from crewai import Agent, Task, Crew, Process, LLM
 
 # Load environment variables
@@ -12,21 +13,61 @@ st.set_page_config(page_title="Leo: Multi-Agent AI Tutor", page_icon="🤖", lay
 
 @st.cache_resource
 def get_llm():
-    token = os.getenv("GROQ_API_KEY")
-    endpoint = os.getenv("BASE_URL")
-    raw_model_name = os.getenv("MODEL_NAME")
+    # Primary API (Groq)
+    primary_token = os.getenv("GROQ_API_KEY")
+    primary_endpoint = os.getenv("BASE_URL")
+    primary_model_name = os.getenv("MODEL_NAME")
     
-    if not token or not raw_model_name:
-        st.error("API KEY or MODEL_NAME environment variable not set. Please check your .env file.")
-        st.stop()
-        
-    fixed_model_name = f"openai/{raw_model_name}"
-    llm = LLM(
-        model=fixed_model_name,
-        api_key=token,
-        base_url=endpoint,
-        temperature=0.5,
-    )
+    # Fallback API (Groq - Backup Model)
+    fallback_token = os.getenv("FALLBACK_API_KEY")
+    fallback_endpoint = os.getenv("FALLBACK_BASE_URL", "https://api.groq.com/openai/v1")
+    fallback_model_name = os.getenv("FALLBACK_MODEL_NAME", "openai/gpt-oss-20b")
+    
+    llm = None
+    
+    # 1. Test and Load Primary API
+    if primary_token and primary_model_name:
+        try:
+            # LiteLLM treats Groq models as OpenAI compatible
+            fixed_model_name = f"openai/{primary_model_name}"
+            
+            import litellm
+            litellm.completion(
+                model=fixed_model_name,
+                api_key=primary_token,
+                api_base=primary_endpoint,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1
+            )
+            
+            llm = LLM(
+                model=fixed_model_name,
+                api_key=primary_token,
+                base_url=primary_endpoint,
+                temperature=0.5,
+            )
+        except Exception as e:
+           # st.warning("⚠️ Primary Model failed. Switching to Fallback Model...")
+            llm = None
+            
+    # 2. Setup Fallback API if Primary failed
+    if llm is None and fallback_token and fallback_model_name:
+        try:
+            fixed_fallback_model = f"openai/{fallback_model_name}"
+            llm = LLM(
+                model=fixed_fallback_model,
+                api_key=fallback_token,
+                base_url=fallback_endpoint,
+                temperature=0.5,
+            )
+        except Exception as e:
+            st.error(f"Fallback Model also failed: {e}")
+            st.stop()
+            
+    if not llm:
+         st.error("No valid API KEYs found in .env file. Please check your configuration.")
+         st.stop()
+
     return llm
 
 llm = get_llm()
