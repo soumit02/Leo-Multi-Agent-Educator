@@ -1,76 +1,60 @@
 import os
+import time
 import streamlit as st
 from dotenv import load_dotenv
-import litellm  # Added for testing the API connection
 from crewai import Agent, Task, Crew, Process, LLM
 
 # Load environment variables
 # Since this file is in src/streamlit/, the .env file is two levels up
 load_dotenv('../../.env')
 
-# --- Configuration & LLM Setup ---
+# --- Configuration Setup ---
 st.set_page_config(page_title="Leo: Multi-Agent AI Tutor", page_icon="🤖", layout="wide")
 
-@st.cache_resource
-def get_llm():
-    # Primary API (Groq)
-    primary_token = os.getenv("GROQ_API_KEY")
-    primary_endpoint = os.getenv("BASE_URL")
-    primary_model_name = os.getenv("MODEL_NAME")
-    
-    # Fallback API (Groq - Backup Model)
-    fallback_token = os.getenv("FALLBACK_API_KEY")
-    fallback_endpoint = os.getenv("FALLBACK_BASE_URL", "https://api.groq.com/openai/v1")
-    fallback_model_name = os.getenv("FALLBACK_MODEL_NAME", "openai/gpt-oss-20b")
-    
-    llm = None
-    
-    # 1. Test and Load Primary API
-    if primary_token and primary_model_name:
-        try:
-            # LiteLLM treats Groq models as OpenAI compatible
-            fixed_model_name = f"openai/{primary_model_name}"
-            
-            import litellm
-            litellm.completion(
-                model=fixed_model_name,
-                api_key=primary_token,
-                api_base=primary_endpoint,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=1
-            )
-            
-            llm = LLM(
-                model=fixed_model_name,
-                api_key=primary_token,
-                base_url=primary_endpoint,
-                temperature=0.5,
-            )
-        except Exception as e:
-           # st.warning("⚠️ Primary Model failed. Switching to Fallback Model...")
-            llm = None
-            
-    # 2. Setup Fallback API if Primary failed
-    if llm is None and fallback_token and fallback_model_name:
-        try:
-            fixed_fallback_model = f"openai/{fallback_model_name}"
-            llm = LLM(
-                model=fixed_fallback_model,
-                api_key=fallback_token,
-                base_url=fallback_endpoint,
-                temperature=0.5,
-            )
-        except Exception as e:
-            st.error(f"Fallback Model also failed: {e}")
+# --- Session State Management ---
+# Moved to the top so we can determine which LLM to load before initializing agents
+if 'active_llm_tier' not in st.session_state:
+    st.session_state.active_llm_tier = 'primary'
+if 'phase' not in st.session_state:
+    st.session_state.phase = 'input'
+if 'lesson_content' not in st.session_state:
+    st.session_state.lesson_content = ""
+if 'quiz_content' not in st.session_state:
+    st.session_state.quiz_content = ""
+if 'topic' not in st.session_state:
+    st.session_state.topic = ""
+if 'reteach_count' not in st.session_state:
+    st.session_state.reteach_count = 0
+
+# --- Dynamic LLM Loader ---
+@st.cache_resource(show_spinner=False)
+def get_llm(tier):
+    if tier == 'primary':
+        token = os.getenv("GROQ_API_KEY")
+        endpoint = os.getenv("BASE_URL")
+        model_name = os.getenv("MODEL_NAME")
+        
+        if not token or not model_name:
+            st.error("Primary API credentials missing in .env file.")
             st.stop()
             
-    if not llm:
-         st.error("No valid API KEYs found in .env file. Please check your configuration.")
-         st.stop()
+        fixed_model_name = f"openai/{model_name}"
+        return LLM(model=fixed_model_name, api_key=token, base_url=endpoint, temperature=0.5)
+        
+    elif tier == 'fallback':
+        token = os.getenv("FALLBACK_API_KEY")
+        endpoint = os.getenv("FALLBACK_BASE_URL", "https://api.groq.com/openai/v1")
+        model_name = os.getenv("FALLBACK_MODEL_NAME", "openai/gpt-oss-20b")
+        
+        if not token or not model_name:
+            st.error("Fallback API credentials missing in .env file.")
+            st.stop()
+            
+        fixed_fallback_model = f"openai/{model_name}"
+        return LLM(model=fixed_fallback_model, api_key=token, base_url=endpoint, temperature=0.5)
 
-    return llm
-
-llm = get_llm()
+# Load the LLM based on the current active tier
+llm = get_llm(st.session_state.active_llm_tier)
 
 # --- Custom UI Function for Active Agent Indicator ---
 def show_active_agents(phase):
@@ -78,7 +62,6 @@ def show_active_agents(phase):
     
     col1, col2, col3, col4 = st.columns(4)
     
-    # Define agent states based on the current phase
     states = {
         'coordinator': {'active': False, 'status': 'Idle', 'icon': '👨‍💼', 'name': 'Coordinator'},
         'explainer': {'active': False, 'status': 'Idle', 'icon': '👨‍🏫', 'name': 'Explainer'},
@@ -97,7 +80,6 @@ def show_active_agents(phase):
         states['evaluator']['active'] = True
         states['evaluator']['status'] = 'Grading Answers...'
         
-    # Helper to style the cards
     def render_agent_card(agent_info):
         border_color = "#00FF00" if agent_info['active'] else "#cccccc"
         bg_color = "rgba(0, 255, 0, 0.1)" if agent_info['active'] else "transparent"
@@ -120,18 +102,6 @@ def show_active_agents(phase):
         st.markdown(render_agent_card(states['quiz_master']), unsafe_allow_html=True)
     with col4:
         st.markdown(render_agent_card(states['evaluator']), unsafe_allow_html=True)
-
-# --- Session State Management ---
-if 'phase' not in st.session_state:
-    st.session_state.phase = 'input'
-if 'lesson_content' not in st.session_state:
-    st.session_state.lesson_content = ""
-if 'quiz_content' not in st.session_state:
-    st.session_state.quiz_content = ""
-if 'topic' not in st.session_state:
-    st.session_state.topic = ""
-if 'reteach_count' not in st.session_state:
-    st.session_state.reteach_count = 0
 
 # --- Agent Definitions ---
 coordinator = Agent(
@@ -204,13 +174,11 @@ if st.session_state.phase == 'input':
 elif st.session_state.phase == 'teaching':
     st.header(f"📚 Topic: {st.session_state.topic}")
     
-    # Active Agents Visual Indicator
     show_active_agents('teaching')
     
     with st.spinner("Preparing your lesson and quiz... Please wait."):
         topic_context = st.session_state.topic
         
-        # Feedback Loop Logic: If student failed previously, tell Explainer to re-teach
         if st.session_state.reteach_count > 0:
             topic_context += " (NOTE: The student provided incorrect answers to the previous quiz. Please explain the concept more simply, using different and easier real-world examples.)"
 
@@ -236,14 +204,25 @@ elif st.session_state.phase == 'teaching':
             verbose=False
         )
         
-        # Execute the crew
-        teaching_crew.kickoff(inputs={"topic": topic_context})
-        
-        # Save output to session state
-        st.session_state.lesson_content = explain_task.output.raw
-        st.session_state.quiz_content = quiz_task.output.raw
-        st.session_state.phase = 'quizzing'
-        st.rerun()
+        # Robust Mid-Flight Error Handling
+        try:
+            teaching_crew.kickoff(inputs={"topic": topic_context})
+            
+            # Save output to session state only if successful
+            st.session_state.lesson_content = explain_task.output.raw
+            st.session_state.quiz_content = quiz_task.output.raw
+            st.session_state.phase = 'quizzing'
+            st.rerun()
+            
+        except Exception as e:
+            if st.session_state.active_llm_tier == 'primary':
+                st.session_state.active_llm_tier = 'fallback'
+               # st.warning("⚠️ Primary AI model reached its token limit mid-way. Automatically switching to Backup AI...")
+                time.sleep(3) # Let the user read the warning
+                st.rerun()
+            else:
+                st.error("🚨 The system is currently experiencing high demand (Too many requests). Please try again in a few minutes.")
+                st.stop()
 
 # ==========================================
 # Phase 3: Display Lesson & Get Student Answer (Human-in-the-Loop)
@@ -280,7 +259,6 @@ elif st.session_state.phase == 'quizzing':
 elif st.session_state.phase == 'evaluating':
     st.header("⚖️ Evaluation")
     
-    # Active Agents Visual Indicator
     show_active_agents('evaluating')
     
     with st.spinner("Checking your answers against the correct facts..."):
@@ -304,25 +282,36 @@ elif st.session_state.phase == 'evaluating':
             verbose=False
         )
         
-        # Execute Evaluation
-        eval_result = eval_crew.kickoff()
-        feedback_text = str(eval_result)
-        
-        st.markdown("### Feedback")
-        st.write(feedback_text)
-        
-        # Feedback Loop Logic
-        if "RE-TEACH NEEDED" in feedback_text.upper():
-            st.error("🚨 Some answers were incorrect. The Tutor will re-teach the topic using easier examples.")
-            st.session_state.reteach_count += 1
-            if st.button("Start Re-learning", type="primary"):
-                st.session_state.phase = 'teaching'
+        # Robust Mid-Flight Error Handling for Evaluation
+        try:
+            eval_result = eval_crew.kickoff()
+            feedback_text = str(eval_result)
+            
+            st.markdown("### Feedback")
+            st.write(feedback_text)
+            
+            # Feedback Loop Logic
+            if "RE-TEACH NEEDED" in feedback_text.upper():
+                st.error("🚨 Some answers were incorrect. The Tutor will re-teach the topic using easier examples.")
+                st.session_state.reteach_count += 1
+                if st.button("Start Re-learning", type="primary"):
+                    st.session_state.phase = 'teaching'
+                    st.rerun()
+            else:
+                st.success("🎉 Congratulations! You have perfectly mastered this topic.")
+                if st.button("Learn a New Topic", type="primary"):
+                    st.session_state.phase = 'input'
+                    st.session_state.reteach_count = 0
+                    st.lesson_content = ""
+                    st.quiz_content = ""
+                    st.rerun()
+                    
+        except Exception as e:
+            if st.session_state.active_llm_tier == 'primary':
+                st.session_state.active_llm_tier = 'fallback'
+                st.warning("⚠️ Primary AI model reached its token limit mid-way. Automatically switching to Backup AI...")
+                time.sleep(3)
                 st.rerun()
-        else:
-            st.success("🎉 Congratulations! You have perfectly mastered this topic.")
-            if st.button("Learn a New Topic", type="primary"):
-                st.session_state.phase = 'input'
-                st.session_state.reteach_count = 0
-                st.lesson_content = ""
-                st.quiz_content = ""
-                st.rerun()
+            else:
+                st.error("🚨 The system is currently experiencing high demand (Too many requests). Please try again in a few minutes.")
+                st.stop()
