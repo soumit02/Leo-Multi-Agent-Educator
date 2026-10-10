@@ -3,11 +3,16 @@
 ![Leo AI Tutor](images/running_agent.png)
 *Live Agent Status indicating which agents are actively preparing the lesson and quiz.*
 
+## 🔗 Live Application
+**Try Leo live here:** [Leo: Multi-Agent AI Tutor](https://leo-multi-agent-educator-8dhazcbwqpu7dzwwrrc9h6.streamlit.app/)
+
 ## 📖 Project Overview
 **Leo** is an advanced, interactive multi-agent educational platform powered by **CrewAI** and **Streamlit**. Instead of relying on a single generic chatbot, Leo utilizes a team of specialized AI agents working together to teach concepts, test knowledge, and provide personalized feedback. If a student struggles with a concept, the system automatically triggers a re-teaching loop with easier examples, ensuring complete mastery of the topic.
 
 ## ✨ Key Features
 * **Multi-Agent Collaboration:** Specialized agents (Manager, Teacher, Quizzer, Grader) handle distinct parts of the learning process.
+* **Robust Mid-Flight Fallback:** Ensures 100% uptime by seamlessly switching to a backup AI model if the primary API fails or exhausts its token limit midway through a task.
+* **Graceful Degradation:** Displays clear, user-friendly messages during severe server overload instead of throwing technical Python errors.
 * **Human-in-the-Loop:** Pauses execution to take real student input for quizzes.
 * **Dynamic Feedback Loop (Re-teaching):** Automatically generates simpler explanations if the student answers incorrectly.
 * **Live Agent Status UI:** A visually appealing dashboard showing which agent is currently "thinking" or "acting".
@@ -121,9 +126,15 @@ python -m pip install -r requirements.txt
 **3. Setup Environment Variables:**
 Create a `.env` file in the root directory and add your API credentials:
 ```env
+# Primary API
 GROQ_API_KEY=your_api_key_here
 BASE_URL=https://api.groq.com/openai/v1
 MODEL_NAME=llama-3.1-70b-versatile  # Or whichever model you are using
+
+# Fallback API
+FAllBACK_API_KEY=your_backup_api_key_here
+FALLBACK_BASE_URL=your_backup_base_url_here
+FALLBACK_MODEL=your_backup_model_name_here
 ```
 
 **4. Run the Streamlit Application:**
